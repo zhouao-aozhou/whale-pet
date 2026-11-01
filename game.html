@@ -759,11 +759,25 @@
 
   /* 窄屏：三层竖排（订单 → 办公室 → 员工），各自滚动 */
   @media (max-width: 900px) {
-      main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 22vh) 1fr minmax(0, var(--rh, 30vh)); }
+      main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 26vh) 1fr minmax(0, var(--rh, 30vh)); }
       .sheetHandle { display: flex; }
-      .col.right { min-height: 0; }
-    .col.left .scroll .order { min-width: 210px; margin-bottom: 0; }
-    .col.right { border-left: 0; border-top: 1px solid var(--line); }
+      .col.left { border-right: 0; border-bottom: 1px solid var(--line); }
+      /* 订单大厅：小方格网格，竖着滚 */
+      .col.left .scroll {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 7px; padding: 7px; align-content: start;
+        overflow-y: auto; overflow-x: hidden;
+      }
+      .col.left .scroll .order { min-width: 0; width: auto; margin-bottom: 0; padding: 7px 8px; }
+      .col.left .scroll .order .title { font-size: 11.5px; margin: 3px 0 2px; }
+      .col.left .scroll .order .row1 { font-size: 10px; gap: 4px; }
+      .col.left .scroll .order .tag { padding: 1px 5px; font-size: 9px; border-width: 1px; }
+      .col.left .scroll .order .meta { font-size: 9.5px; gap: 5px; flex-wrap: wrap; }
+      .col.left .scroll .order .stars { font-size: 10px; }
+      .col.left .scroll .order .dl { font-size: 9.5px; }
+      .col.left .scroll .order .task { font-size: 9.5px; padding: 3px 5px; margin-top: 4px !important; }
+      .col.left .scroll .order .bar { height: 3px; margin-top: 4px; }
+      .col.right { min-height: 0; border-left: 0; border-top: 1px solid var(--line); }
     .topbar { flex-wrap: wrap; gap: 6px; padding: 7px 10px; }
     .res { gap: 5px; }
     .chip { padding: 3px 8px; font-size: 12px; }
@@ -932,8 +946,18 @@
    配置区：想改名/换头像/调数值，只改这里
    ========================================================= */
 const CFG = {
-  days: 30,
+  days: 100,
   rentPerDay: 120,
+
+  // 难度（新开一局时选择，只影响金钱与订单难度）
+  difficulties: [
+    { id: "easy",   name: "轻松", color: "#59d98c", rewardMul: 1.00, costMul: 1.00, needMul: 1.00, startCash: 6000, costRamp: 0.012,
+      desc: "钱比较宽裕，适合随便玩玩" },
+    { id: "normal", name: "标准", color: "#7de3ff", rewardMul: 0.74, costMul: 1.10, needMul: 1.00, startCash: 7000, costRamp: 0.010,
+      desc: "每一单都要算账，容易翻车" },
+    { id: "hard",   name: "硬核", color: "#ff9b9b", rewardMul: 0.66, costMul: 1.15, needMul: 1.10, startCash: 7000, costRamp: 0.014,
+      desc: "乱点必死，得认真配人" },
+  ],
   orderPerDay: 3,
   startCash: 6000,
   startCompute: 60,
@@ -1052,10 +1076,34 @@ let selOrder = null;
 let selStaff = null;
 let selWorker = null;
 
-function newGame() {
+/* 让玩家选难度，然后开新局 */
+function pickDifficulty(onDone) {
+  const list = CFG.difficulties.map(d =>
+    `<button class="pickrow" style="margin-bottom:6px" onclick="startWithDifficulty('${d.id}', ${!!onDone})">
+       <span style="color:${d.color};font-weight:600">${d.name}</span>
+       <em>${d.desc}</em>
+     </button>`).join("");
+  showModal("选个难度", `<div class="picklist">${list}</div>`, [{ label: "取消", fn: null }]);
+}
+
+function startWithDifficulty(id, thenSave) {
+  const box = $("modalBox");
+  if (box) box.parentElement.classList.remove("on");
+  newGame(id);
+  renderAll();
+  const d = CFG.diff;
+  toast(`新的一局（${d.name}）`, "");
+  log(`新开一局：${d.name}`);
+}
+
+function newGame(diffId) {
+  const diff = CFG.difficulties.find(x => x.id === diffId) || CFG.difficulties[0];
+  CFG.diff = diff;
+
   G = {
     day: 1,
-    cash: CFG.startCash,
+    diffId: diff.id,
+    cash: diff.startCash,
     compute: CFG.startCompute,
     reputation: 50,
     morale: 60,
@@ -1064,7 +1112,7 @@ function newGame() {
     logs: [],
     finished: false,
     lastAssign: null,
-    peakCash: CFG.startCash,
+    peakCash: diff.startCash,
     staff: CFG.staff.map(s => ({
       ...s,
       mood: (s.start ? s.start.mood : 70) + rnd(-6, 6),
@@ -1148,7 +1196,7 @@ function spawnOrder() {
     idea: ["新品创意提案", "广告脚本", "活动策划"],
     cs:   ["大客户陪跑", "工单批量回复", "售后回访"],
   };
-  let need = stars * 13;
+  let need = Math.round(stars * 13 * CFG.diff.needMul);
   G.orders.push({
     id: ++oid,
     type: t,
@@ -1157,7 +1205,7 @@ function spawnOrder() {
     need,
     progress: 0,
     daysLeft: rnd(2, 4) + stars,
-    reward: Math.round(stars * 800 + rnd(0, 250)),
+    reward: Math.round((stars * 800 + rnd(0, 250)) * CFG.diff.rewardMul),
     penalty: stars * 320,
     computeCost: stars * 6,
     crew: [],
@@ -1179,8 +1227,8 @@ function spawnOrder() {
     o.modColor = mod.color;
     if (mod.starAdd) {
       o.stars = Math.min(starCap(G.day) + 1, o.stars + mod.starAdd);
-      o.need = o.stars * 13;
-      o.reward = Math.round(o.stars * 800 + rnd(0, 250));
+      o.need = Math.round(o.stars * 13 * CFG.diff.needMul);
+      o.reward = Math.round((o.stars * 800 + rnd(0, 250)) * CFG.diff.rewardMul);
     }
     if (mod.ddl) o.daysLeft = Math.max(2, o.daysLeft + mod.ddl);
     if (mod.mulReward) o.reward = Math.round(o.reward * mod.mulReward);
@@ -2030,7 +2078,8 @@ function endDay() {
   const aiWages = G.staff.reduce((a, s) => a + s.wage, 0);
   const workerWages = G.workers.reduce((a, w) => a + w.wage, 0);
   const wages = aiWages + workerWages;
-  G.cash -= wages + CFG.rentPerDay;
+  const costMul = ((CFG.diff && CFG.diff.costMul) || 1) * (1 + ((CFG.diff && CFG.diff.costRamp) || 0) * (G.day - 1));
+  G.cash -= Math.round((wages + CFG.rentPerDay) * costMul);
   log(`💸 发薪 ¥${wages}（AI ${aiWages} + 员工 ${workerWages}）+ 房租 ¥${CFG.rentPerDay}`);
   deltas.push(`💸 发薪 <span style="color:#ff9b9b">-¥${wages}</span> · 房租 <span style="color:#ff9b9b">-¥${CFG.rentPerDay}</span>`);
 
@@ -2118,14 +2167,14 @@ function checkEnd() {
   else if (G.day > CFG.days) {
     const avg = G.staff.reduce((a, s) => a + s.mood, 0) / G.staff.length;
     if (G.investor > 70 && avg > 70) ending = { t: "人性化乌托邦", d: "公司赚钱，员工开心。你证明了：不压榨也能活得好。" };
-    else if (G.cash > 15000) ending = { t: "行业龙头", d: "你成了行业第一，代价是所有人都累得说不出话。" };
+    else if (G.cash > 90000) ending = { t: "行业龙头", d: "你成了行业第一，代价是所有人都累得说不出话。" };
     else if (avg < 40) ending = { t: "黑心公司", d: "利润漂亮，员工麻木。有人把你的公司写成了反面教材。" };
     else ending = { t: "平稳收官", d: "不惊艳，但活下来了。这行本来就不容易。" };
   }
   if (ending) {
     G.finished = true;
     showModal("结局：" + ending.t, ending.d + `<br><br>第 ${G.day - 1} 天 · 资金 ¥${G.cash} · 口碑 ${G.reputation} · 士气 ${G.morale}`,
-      [{ label: "重开一局", fn: () => { newGame(); } }]);
+      [{ label: "重开一局", fn: () => { pickDifficulty(true); } }]);
   }
 }
 
@@ -2160,6 +2209,7 @@ function load() {
     if (typeof G.peakCash !== "number") G.peakCash = Math.max(G.cash || 0, CFG.startCash);
     if (!Array.isArray(G.bag)) G.bag = [];
     if (!Array.isArray(G.history)) G.history = [];
+    CFG.diff = CFG.difficulties.find(x => x.id === G.diffId) || CFG.difficulties[0];
     if (!G.bought || typeof G.bought !== "object") G.bought = {};
     // 旧存档迁移：初始下属技能压到 2~3（招募来的按档次保留）
     let migrated = false;
@@ -2931,7 +2981,7 @@ const INTRO_STEPS = [
     t: "欢迎，CEO",
     b: `
       <div class="li"><span class="ic">🏢</span><span>你接手一家 AI 公司：<b>5 个 AI 主管</b> + <b>11 名下属</b>。<span class="sub">Claude / DeepSeek / Gemini / Grok / ChatGPT，各自擅长不同领域</span></span></div>
-      <div class="li"><span class="ic">🎯</span><span>目标：<b>撑过 30 天</b>，看你把公司带成什么样。</span></div>
+      <div class="li"><span class="ic">🎯</span><span>目标：<b>撑过 100 天</b>，看你把公司带成什么样。</span></div>
       <div class="li"><span class="ic">💀</span><span>失败条件：<em>资金变负</em> · <em>全员心情崩盘</em> · <em>口碑跌穿</em></span></div>`,
   },
   {
@@ -2985,6 +3035,7 @@ const INTRO_STEPS = [
 ];
 
 let introIdx = 0;
+let firstRunPickDiff = false;   // 首次进入：引导结束后先选难度
 
 function renderIntro() {
   const s = INTRO_STEPS[introIdx];
@@ -3008,6 +3059,7 @@ function closeIntro() {
   const el = $("intro");
   if (el) el.classList.remove("on");
   try { localStorage.setItem("aicompany_intro_v1", "1"); } catch (e) {}
+  if (firstRunPickDiff) { firstRunPickDiff = false; setTimeout(pickDifficulty, 260); return; }
   maybeStartGuide();
 }
 
@@ -3153,7 +3205,7 @@ function maybeStartGuide() {
 const RES_TIPS = {
   day: {
     t: "第 N 天",
-    d: "当前进度。撑到第 <b>30 天</b> 结束，按最终成绩给出结局。",
+    d: "当前进度。撑到第 <b>100 天</b> 结束，按最终成绩给出结局。",
     g: "",
   },
   cash: {
@@ -3225,12 +3277,9 @@ document.getElementById("introNext").onclick = introNext;
 document.getElementById("introPrev").onclick = introPrev;
 document.getElementById("introSkip").onclick = closeIntro;
 document.getElementById("btnRestart").onclick = () => {
-  showConfirm("重开新局？", "当前进度会被清空，随机换一批订单和开局状态。", () => {
-    newGame();
-    const line = G.staff.map(s => `${s.name} 心${Math.round(s.mood)}/疲${Math.round(s.fatigue)}`).join(" · ");
-    toast("新的一局：" + line, "");
-    log("本局开局：" + line);
-  }, "重开新局");
+  showConfirm("重开新局？", "当前进度会被清空，先选一个难度。", () => {
+    pickDifficulty(true);
+  }, "选难度");
 };
 if (document.addEventListener) {
   document.addEventListener("keydown", e => {
@@ -3249,7 +3298,10 @@ document.getElementById("dayfx").onclick = () => {
   clearTimeout(dayFxTimer);
 };
 
-if (!load()) newGame();
+if (!load()) {
+  newGame();
+  firstRunPickDiff = true;
+}
 else { renderAll(); log("读取上次存档。"); }
 
 initSheetDrag();   // 手机端底部面板拖拽
