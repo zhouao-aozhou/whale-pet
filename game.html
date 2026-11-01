@@ -371,7 +371,7 @@
   .rest { margin-top: 7px; font-size: 11px; color: #8ea3c9; text-align: center; }
 
   /* ---------- 右侧面板 ---------- */
-  .panel-body { padding: 12px; overflow-y: auto; }
+  .panel-body { padding: 12px; overflow-y: auto; flex: 1; min-height: 0; }
   .pcard { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
   .pcard h3 { margin: 0 0 8px; font-size: 13px; color: #cfe0ff; }
   .skill { display: flex; align-items: center; gap: 6px; font-size: 11.5px; margin-bottom: 4px; color: var(--dim); }
@@ -744,11 +744,24 @@
     .desk .avatar { width: 56px; height: 56px; }
     .desk .nm { font-size: 12px; }
   }
+  /* 手机端：底部面板可拖拽 */
+  .sheetHandle {
+    display: none; flex: none; height: 18px; align-items: center; justify-content: center;
+    cursor: grab; touch-action: none; user-select: none;
+    background: #131c30; border-bottom: 1px solid #24304a;
+  }
+  .sheetHandle:active { cursor: grabbing; }
+  .sheetHandle i {
+    display: block; width: 42px; height: 4px; border-radius: 3px;
+    background: #46608f; transition: background .15s;
+  }
+  .sheetHandle:active i { background: #7ba0dd; }
+
   /* 窄屏：三层竖排（订单 → 办公室 → 员工），各自滚动 */
   @media (max-width: 900px) {
-    main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 24vh) 1fr minmax(0, 26vh); }
-    .col.left { border-right: 0; border-bottom: 1px solid var(--line); }
-    .col.left .scroll { display: flex; gap: 9px; overflow-x: auto; overflow-y: hidden; padding: 9px; }
+      main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 22vh) 1fr minmax(0, var(--rh, 30vh)); }
+      .sheetHandle { display: flex; }
+      .col.right { min-height: 0; }
     .col.left .scroll .order { min-width: 210px; margin-bottom: 0; }
     .col.right { border-left: 0; border-top: 1px solid var(--line); }
     .topbar { flex-wrap: wrap; gap: 6px; padding: 7px 10px; }
@@ -805,6 +818,7 @@
     </div>
 
     <div class="col right">
+      <div class="sheetHandle" id="sheetHandle" title="拖动调整高度"><i></i></div>
       <div class="colhead"><span id="pTitle">员工详情</span><span id="pDay">—</span></div>
       <div class="panel-body" id="panel"></div>
     </div>
@@ -2326,7 +2340,73 @@ function goBack() {
   document.body.classList.remove("hr-mode");
 }
 
+/* 手机端：拖动底部面板的把手来调整高度 */
+let sheetH = 0;          // 当前高度(px)，0 = 跟随 CSS 默认
+function initSheetDrag() {
+  if (typeof document.querySelector !== "function") return;
+  const h = $("sheetHandle");
+  if (!h) return;
+  const main = document.querySelector("main");
+  if (!main) return;
+
+  let startY = 0, startH = 0, dragging = false, moved = 0;
+
+  const curH = () => {
+    const col = document.querySelector(".col.right");
+    return col ? col.getBoundingClientRect().height : 0;
+  };
+  const setH = (px) => {
+    const vh = window.innerHeight;
+    const minH = vh * 0.10, maxH = vh * 0.78;
+    const v = Math.max(minH, Math.min(maxH, px));
+    sheetH = v;
+    main.style.setProperty("--rh", v + "px");
+  };
+
+  const down = (e) => {
+    dragging = true; moved = 0;
+    startY = (e.touches ? e.touches[0].clientY : e.clientY);
+    startH = curH();
+    if (h.setPointerCapture && e.pointerId !== undefined) {
+      try { h.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+  };
+  const move = (e) => {
+    if (!dragging) return;
+    const y = (e.touches ? e.touches[0].clientY : e.clientY);
+    const dy = startY - y;          // 往上拖为正
+    moved = Math.max(moved, Math.abs(dy));
+    if (moved > 3) { e.preventDefault(); }
+    setH(startH + dy);
+  };
+  const up = () => {
+    if (!dragging) return;
+    dragging = false;
+    if (moved < 6) {
+      // 没怎么动 = 点一下：在收起/展开之间切换
+      const vh = window.innerHeight;
+      const now = curH();
+      setH(now < vh * 0.42 ? vh * 0.70 : vh * 0.18);
+    }
+    try { localStorage.setItem("aicompany_sheet_h", String(sheetH || 0)); } catch (err) {}
+  };
+
+  h.addEventListener("mousedown", down);
+  h.addEventListener("touchstart", down, { passive: true });
+  window.addEventListener("mousemove", move);
+  window.addEventListener("touchmove", move, { passive: false });
+  window.addEventListener("mouseup", up);
+  window.addEventListener("touchend", up);
+
+  // 恢复上次拖到的高度
+  try {
+    const saved = Number(localStorage.getItem("aicompany_sheet_h") || 0);
+    if (saved > 60) setH(saved);
+  } catch (err) {}
+}
+
 function goHistory() {
+
   renderHistory();
   document.body.classList.add("hist-mode");
 }
@@ -3171,6 +3251,8 @@ document.getElementById("dayfx").onclick = () => {
 
 if (!load()) newGame();
 else { renderAll(); log("读取上次存档。"); }
+
+initSheetDrag();   // 手机端底部面板拖拽
 
 try {
   var forceIntro = (typeof location !== "undefined") && location.hash === "#intro";
